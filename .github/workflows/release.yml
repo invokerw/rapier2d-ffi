@@ -10,10 +10,36 @@ permissions:
 
 jobs:
   # -------------------------------------------------------
+  # C 单元测试（测试通过后才允许打包）
+  # -------------------------------------------------------
+  test:
+    name: Test / Linux x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build library
+        run: cargo build --release
+
+      - name: Build C tests
+        run: |
+          cc -o test/test_rapier2d test/test_rapier2d.c \
+            -I. -Ltarget/release -lrapier2d_ffi \
+            -lm -lpthread -ldl
+
+      - name: Run C tests
+        run: LD_LIBRARY_PATH=target/release ./test/test_rapier2d
+
+  # -------------------------------------------------------
   # Linux x86_64 (原生编译)
   # -------------------------------------------------------
   build-linux:
     name: Build / Linux x86_64
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +71,7 @@ jobs:
   # -------------------------------------------------------
   build-macos:
     name: Build / macOS Universal
+    needs: [test]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -85,6 +112,7 @@ jobs:
   # -------------------------------------------------------
   build-windows:
     name: Build / Windows x86_64
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
