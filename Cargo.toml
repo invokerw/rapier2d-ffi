@@ -1,0 +1,27 @@
+[package]
+name = "rapier2d-ffi"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.86"
+description = "C FFI bindings for the rapier2d physics engine."
+license = "Apache-2.0"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+rapier2d = { version = "0.32.0", features = ["enhanced-determinism"] }
+parry2d = { version = "0.26.0", features = ["enhanced-determinism"] }
+
+[build-dependencies]
+cbindgen = "0.28"
+
+[patch.crates-io]
+# Uncomment for local development:
+# rapier2d = { path = "../rapier2d" }
+# parry2d = { path = "../../../parry/crates/parry2d" }
+
+rapier2d = { git = "https://github.com/dimforge/rapier", branch = "master" }
+# parry2d = { git = "https://github.com/dimforge/parry", branch = "master" }

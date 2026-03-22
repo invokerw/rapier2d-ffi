@@ -1,0 +1,10 @@
+/target
+/dist
+Cargo.lock
+
+# Test binary
+/test/test_rapier2d
+/test/visual_test
+
+
+.claude
