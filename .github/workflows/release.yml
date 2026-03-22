@@ -1,0 +1,144 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  # -------------------------------------------------------
+  # Linux x86_64 (原生编译)
+  # -------------------------------------------------------
+  build-linux:
+    name: Build / Linux x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp target/x86_64-unknown-linux-gnu/release/librapier2d_ffi.so dist/
+          cp target/x86_64-unknown-linux-gnu/release/librapier2d_ffi.a  dist/
+          cp rapier2d_ffi.h dist/
+          tar -czf rapier2d-ffi-linux-x86_64.tar.gz -C dist .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: rapier2d-ffi-linux-x86_64.tar.gz
+
+  # -------------------------------------------------------
+  # macOS Universal Binary (arm64 + x86_64)
+  # -------------------------------------------------------
+  build-macos:
+    name: Build / macOS Universal
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build arm64
+        run: cargo build --release --target aarch64-apple-darwin
+
+      - name: Build x86_64
+        run: cargo build --release --target x86_64-apple-darwin
+
+      - name: Package (lipo Universal Binary)
+        run: |
+          mkdir -p dist
+          lipo -create \
+            target/aarch64-apple-darwin/release/librapier2d_ffi.dylib \
+            target/x86_64-apple-darwin/release/librapier2d_ffi.dylib \
+            -output dist/librapier2d_ffi.dylib
+          lipo -create \
+            target/aarch64-apple-darwin/release/librapier2d_ffi.a \
+            target/x86_64-apple-darwin/release/librapier2d_ffi.a \
+            -output dist/librapier2d_ffi.a
+          cp rapier2d_ffi.h dist/
+          tar -czf rapier2d-ffi-macos-universal.tar.gz -C dist .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal
+          path: rapier2d-ffi-macos-universal.tar.gz
+
+  # -------------------------------------------------------
+  # Windows x86_64 (mingw-w64 交叉编译)
+  # -------------------------------------------------------
+  build-windows:
+    name: Build / Windows x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mingw-w64
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        env:
+          CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
+          AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
+          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
+        run: cargo build --release --target x86_64-pc-windows-gnu
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp target/x86_64-pc-windows-gnu/release/rapier2d_ffi.dll     dist/ 2>/dev/null || true
+          cp target/x86_64-pc-windows-gnu/release/librapier2d_ffi.a    dist/ 2>/dev/null || true
+          cp target/x86_64-pc-windows-gnu/release/rapier2d_ffi.dll.a   dist/ 2>/dev/null || true
+          cp rapier2d_ffi.h dist/
+          cd dist && zip -r ../rapier2d-ffi-windows-x86_64.zip .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: rapier2d-ffi-windows-x86_64.zip
+
+  # -------------------------------------------------------
+  # 创建 GitHub Release
+  # -------------------------------------------------------
+  release:
+    name: Create Release
+    needs: [build-linux, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            artifacts/linux-x86_64/rapier2d-ffi-linux-x86_64.tar.gz \
+            artifacts/macos-universal/rapier2d-ffi-macos-universal.tar.gz \
+            artifacts/windows-x86_64/rapier2d-ffi-windows-x86_64.zip
