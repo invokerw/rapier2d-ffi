@@ -25,6 +25,10 @@ HEADER_NAME="rapier2d_ffi.h"
 # 输出根目录
 DIST_DIR="$SCRIPT_DIR/dist"
 
+# 检测宿主系统
+HOST_OS="$(uname -s)"   # Darwin | Linux
+HOST_ARCH="$(uname -m)" # x86_64 | arm64 | aarch64
+
 # 颜色输出
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -56,13 +60,21 @@ do_setup() {
     echo ""
     warn "交叉编译还需要安装以下系统工具链："
     echo ""
-    echo "  Linux 交叉编译 (在 macOS 上):"
-    echo "    brew tap messense/macos-cross-toolchains"
-    echo "    brew install x86_64-unknown-linux-gnu"
-    echo "    brew install aarch64-unknown-linux-gnu"
-    echo ""
-    echo "  Windows 交叉编译 (在 macOS 上):"
-    echo "    brew install mingw-w64"
+    if [[ "$HOST_OS" == "Darwin" ]]; then
+        echo "  Linux 交叉编译 (在 macOS 上):"
+        echo "    brew tap messense/macos-cross-toolchains"
+        echo "    brew install x86_64-unknown-linux-gnu"
+        echo "    brew install aarch64-unknown-linux-gnu"
+        echo ""
+        echo "  Windows 交叉编译 (在 macOS 上):"
+        echo "    brew install mingw-w64"
+    else
+        echo "  Windows 交叉编译 (在 Linux 上):"
+        echo "    sudo apt install mingw-w64        # Debian/Ubuntu"
+        echo "    sudo dnf install mingw64-gcc      # Fedora/RHEL"
+        echo ""
+        echo "  macOS 交叉编译需在 macOS 上执行（依赖 lipo）"
+    fi
     echo ""
 }
 
@@ -82,6 +94,10 @@ build_target() {
 # macOS: arm64 + x86_64 -> 通用二进制 (Universal Binary)
 # -------------------------------------------------------
 do_build_mac() {
+    if [[ "$HOST_OS" != "Darwin" ]]; then
+        error "macOS Universal Binary 需要 lipo 工具，只能在 macOS 上编译。当前系统: $HOST_OS"
+    fi
+
     local out_dir="$DIST_DIR/mac"
     mkdir -p "$out_dir"
 
@@ -124,20 +140,29 @@ do_build_linux() {
 
     info "===== 编译 Linux (x86_64) ====="
 
-    # 检查交叉编译器是否存在
-    if ! command -v x86_64-unknown-linux-gnu-gcc &>/dev/null; then
-        if command -v x86_64-linux-gnu-gcc &>/dev/null; then
-            # 有些系统上命名不同
+    # 判断是否需要交叉编译
+    if [[ "$HOST_OS" == "Linux" && ( "$HOST_ARCH" == "x86_64" || "$HOST_ARCH" == "amd64" ) ]]; then
+        # 本机就是 Linux x86_64，直接原生编译，无需交叉编译器
+        info "检测到本机 Linux x86_64，使用原生编译..."
+    else
+        # 需要交叉编译（macOS 上或其他架构）
+        info "检测到非本机编译，配置交叉编译器..."
+        if command -v x86_64-unknown-linux-gnu-gcc &>/dev/null; then
+            export CC_x86_64_unknown_linux_gnu=x86_64-unknown-linux-gnu-gcc
+            export AR_x86_64_unknown_linux_gnu=x86_64-unknown-linux-gnu-ar
+            export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-unknown-linux-gnu-gcc
+        elif command -v x86_64-linux-gnu-gcc &>/dev/null; then
+            # Debian/Ubuntu 交叉编译器命名方式
             export CC_x86_64_unknown_linux_gnu=x86_64-linux-gnu-gcc
             export AR_x86_64_unknown_linux_gnu=x86_64-linux-gnu-ar
             export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc
         else
-            error "找不到 Linux 交叉编译器。请运行: ./build.sh setup"
+            if [[ "$HOST_OS" == "Darwin" ]]; then
+                error "找不到 Linux 交叉编译器。请运行:\n  brew tap messense/macos-cross-toolchains\n  brew install x86_64-unknown-linux-gnu"
+            else
+                error "找不到 Linux 交叉编译器。请运行:\n  sudo apt install gcc-x86-64-linux-gnu   # Debian/Ubuntu\n  sudo dnf install gcc-x86_64-linux-gnu   # Fedora/RHEL"
+            fi
         fi
-    else
-        export CC_x86_64_unknown_linux_gnu=x86_64-unknown-linux-gnu-gcc
-        export AR_x86_64_unknown_linux_gnu=x86_64-unknown-linux-gnu-ar
-        export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-unknown-linux-gnu-gcc
     fi
 
     build_target "x86_64-unknown-linux-gnu"
@@ -162,7 +187,11 @@ do_build_windows() {
 
     # 检查 mingw-w64 是否安装
     if ! command -v x86_64-w64-mingw32-gcc &>/dev/null; then
-        error "找不到 mingw-w64 交叉编译器。请运行: brew install mingw-w64"
+        if [[ "$HOST_OS" == "Darwin" ]]; then
+            error "找不到 mingw-w64 交叉编译器。请运行: brew install mingw-w64"
+        else
+            error "找不到 mingw-w64 交叉编译器。请运行:\n  sudo apt install mingw-w64    # Debian/Ubuntu\n  sudo dnf install mingw64-gcc  # Fedora/RHEL"
+        fi
     fi
 
     export CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc
@@ -186,7 +215,11 @@ do_build_windows() {
 # 编译所有平台
 # -------------------------------------------------------
 do_build_all() {
-    do_build_mac
+    if [[ "$HOST_OS" == "Darwin" ]]; then
+        do_build_mac
+    else
+        warn "跳过 macOS 编译（需要在 macOS 上运行，依赖 lipo）"
+    fi
     do_build_linux
     do_build_windows
 
