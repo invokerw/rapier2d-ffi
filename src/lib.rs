@@ -1506,6 +1506,137 @@ pub unsafe extern "C" fn rp_query_intersect_capsule(
 }
 
 // ---------------------------------------------------------------------------
+// 在指定圆内寻找空旷点
+// ---------------------------------------------------------------------------
+
+/// 简单的确定性伪随机数生成器（xorshift32）。
+/// 用于在搜索圆内生成候选点，保持与 `enhanced-determinism` 特性一致。
+fn xorshift32(state: &mut u32) -> u32 {
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *state = x;
+    x
+}
+
+/// 将 xorshift32 的输出映射到 [0.0, 1.0) 区间的 f32。
+fn rand_f32(state: &mut u32) -> f32 {
+    (xorshift32(state) & 0x00FF_FFFF) as f32 / 16_777_216.0
+}
+
+/// 在指定圆形区域内寻找一个"空旷"的点，该点周围 `r2` 半径内没有指定类型的碰撞体。
+///
+/// 算法：在搜索圆 (x, y, r) 内采样候选点，对每个候选点做半径 `r2` 的圆形区域查询，
+/// 如果查询结果中没有匹配 `ignore_collider_types` 的碰撞体，则返回该点。
+///
+/// - `x`, `y`: 搜索圆心
+/// - `r`: 搜索半径
+/// - `r2`: 清空半径（该点周围多大范围内不能有碰撞体）
+/// - `ignore_collider_types`: 位掩码，指定要避开的碰撞体类型
+///   - bit 0 (0x1): 避开实体碰撞体（Solid, collider_type == 0）
+///   - bit 1 (0x2): 避开传感器碰撞体（Sensor, collider_type != 0）
+///   - 0x3: 避开所有碰撞体
+/// - `group`: 碰撞组过滤位掩码
+/// - `mode`: 采样模式
+///   - 0 = 均匀随机采样（搜索圆内各处概率相同）
+///   - 1 = 优先靠近中心（先尝试中心点，然后逐渐向外扩展）
+/// - `max_attempts`: 最大尝试次数
+/// - `out_found`: 输出是否成功找到有效点（true = 找到，false = 未找到）
+/// - 返回值: 找到的空旷点坐标；如果未找到，返回 (0, 0)
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rp_query_find_clear_point(
+    world: *const RpWorld,
+    x: f32,
+    y: f32,
+    r: f32,
+    r2: f32,
+    ignore_collider_types: u32,
+    group: u32,
+    mode: i32,
+    max_attempts: u32,
+    out_found: *mut bool,
+) -> RpVec2 {
+    if world.is_null() {
+        if !out_found.is_null() {
+            *out_found = false;
+        }
+        return RpVec2::default();
+    }
+    let w = &*world;
+
+    // 用位置和半径作为种子，保证确定性
+    let seed = (x.to_bits() ^ y.to_bits() ^ r.to_bits()).wrapping_add(1);
+    let mut rng_state = if seed == 0 { 1u32 } else { seed };
+
+    let filter = QueryFilter::default()
+        .groups(InteractionGroups::new(Group::ALL, group.into(), InteractionTestMode::And));
+
+    let shape = Ball::new(r2);
+
+    for i in 0..max_attempts {
+        let (px, py) = match mode {
+            // mode 1: 优先靠近中心
+            // 第一次尝试中心点，之后按 i/max_attempts 比例逐渐向外扩展，配合随机角度
+            1 => {
+                if i == 0 {
+                    (x, y)
+                } else {
+                    let angle = rand_f32(&mut rng_state) * std::f32::consts::TAU;
+                    let t = i as f32 / max_attempts as f32;
+                    let dist = r * t;
+                    (x + dist * angle.cos(), y + dist * angle.sin())
+                }
+            }
+            // mode 0 (默认): 均匀随机采样（极坐标法，sqrt 保证面积均匀）
+            _ => {
+                let angle = rand_f32(&mut rng_state) * std::f32::consts::TAU;
+                let dist = r * rand_f32(&mut rng_state).sqrt();
+                (x + dist * angle.cos(), y + dist * angle.sin())
+            }
+        };
+
+        // 在候选点周围 r2 范围内查找碰撞体
+        let shape_pos = Pose::translation(px, py);
+        let qp = w.broad_phase.as_query_pipeline(
+            w.narrow_phase.query_dispatcher(),
+            &w.bodies,
+            &w.colliders,
+            filter,
+        );
+
+        let mut found_blocking = false;
+        for (handle, _) in qp.intersect_shape(shape_pos, &shape) {
+            // 检查碰撞体类型是否在避开列表中
+            if let Some(co) = w.colliders.get(handle) {
+                let is_sensor = co.is_sensor();
+                // bit 0: 避开 Solid (非 sensor)
+                // bit 1: 避开 Sensor
+                if (!is_sensor && (ignore_collider_types & 0x1) != 0)
+                    || (is_sensor && (ignore_collider_types & 0x2) != 0)
+                {
+                    found_blocking = true;
+                    break;
+                }
+            }
+        }
+
+        if !found_blocking {
+            if !out_found.is_null() {
+                *out_found = true;
+            }
+            return RpVec2 { x: px, y: py };
+        }
+    }
+
+    // 所有尝试都失败了
+    if !out_found.is_null() {
+        *out_found = false;
+    }
+    RpVec2::default()
+}
+
+// ---------------------------------------------------------------------------
 // 接触对遍历（在 step 之后使用）
 // ---------------------------------------------------------------------------
 // 在每次 rp_world_step 之后，可以查询哪些碰撞体之间产生了接触。

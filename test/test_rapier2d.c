@@ -744,7 +744,70 @@ static void test_group_filtering_queries(void) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  23. NULL world safety — no crashes                                 */
+/*  23. find_clear_point determinism                                   */
+/* ------------------------------------------------------------------ */
+
+static void test_find_clear_point_determinism(void) {
+    RpWorld *w = rp_world_create(0.0f, -9.81f, NULL, NULL);
+
+    /* 放置一些障碍物 */
+    rp_collider_create_circle(w, 3.0f, 0.0f, 1.0f, 0, 0, 0xFFFFFFFF);
+    rp_collider_create_circle(w, -2.0f, 2.0f, 1.5f, 0, 0, 0xFFFFFFFF);
+    rp_collider_create_rect(w, 0.0f, -3.0f, 0.0f, 2.0f, 0.5f, 0, 0, 0xFFFFFFFF);
+    rp_collider_create_circle(w, 1.0f, 4.0f, 0.8f, 1, 0, 0xFFFFFFFF); /* sensor */
+
+    /* ---- mode 0 (随机) 确定性测试：相同参数多次调用结果一致 ---- */
+    bool found1, found2;
+    RpVec2 p1 = rp_query_find_clear_point(w, 0, 0, 10, 2, 0x3, 0xFFFFFFFF, 0, 200, &found1);
+    RpVec2 p2 = rp_query_find_clear_point(w, 0, 0, 10, 2, 0x3, 0xFFFFFFFF, 0, 200, &found2);
+    ASSERT(found1 == found2);
+    if (found1 && found2) {
+        ASSERT_FLOAT_EQ(p1.x, p2.x);
+        ASSERT_FLOAT_EQ(p1.y, p2.y);
+    }
+
+    /* ---- mode 1 (靠近中心) 确定性测试 ---- */
+    RpVec2 p3 = rp_query_find_clear_point(w, 0, 0, 10, 2, 0x3, 0xFFFFFFFF, 1, 200, &found1);
+    RpVec2 p4 = rp_query_find_clear_point(w, 0, 0, 10, 2, 0x3, 0xFFFFFFFF, 1, 200, &found2);
+    ASSERT(found1 == found2);
+    if (found1 && found2) {
+        ASSERT_FLOAT_EQ(p3.x, p4.x);
+        ASSERT_FLOAT_EQ(p3.y, p4.y);
+    }
+
+    /* ---- mode 1 结果应在搜索圆内 ---- */
+    if (found1) {
+        float dist_mode1 = sqrtf(p3.x * p3.x + p3.y * p3.y);
+        ASSERT(dist_mode1 < 10.0f);
+    }
+
+    /* ---- 不同参数应得到不同结果（种子不同） ---- */
+    RpVec2 p5 = rp_query_find_clear_point(w, 5, 5, 10, 2, 0x3, 0xFFFFFFFF, 0, 200, &found1);
+    if (found1 && found2) {
+        ASSERT(fabsf(p1.x - p5.x) > 1e-3f || fabsf(p1.y - p5.y) > 1e-3f);
+    }
+
+    /* ---- ignore_collider_types 过滤测试 ---- */
+    /* 只避开 solid (0x1)，sensor 不影响 */
+    rp_query_find_clear_point(w, 0, 0, 10, 2, 0x1, 0xFFFFFFFF, 1, 200, &found1);
+    /* 避开全部 (0x3)，包括 sensor */
+    rp_query_find_clear_point(w, 0, 0, 10, 2, 0x3, 0xFFFFFFFF, 1, 200, &found2);
+    ASSERT(found1); /* 只避 solid 时应该能找到 */
+
+    /* ---- 空世界一定能找到 ---- */
+    RpWorld *empty = rp_world_create(0.0f, 0.0f, NULL, NULL);
+    bool found_empty;
+    RpVec2 pe = rp_query_find_clear_point(empty, 0, 0, 5, 1, 0x3, 0xFFFFFFFF, 0, 10, &found_empty);
+    ASSERT(found_empty);
+    float de = sqrtf(pe.x * pe.x + pe.y * pe.y);
+    ASSERT(de <= 5.0f + 1e-3f);
+    rp_world_destroy(empty);
+
+    rp_world_destroy(w);
+}
+
+/* ------------------------------------------------------------------ */
+/*  24. NULL world safety — no crashes                                 */
 /* ------------------------------------------------------------------ */
 
 static void test_null_safety(void) {
@@ -799,6 +862,11 @@ static void test_null_safety(void) {
 
     ASSERT(rp_world_contact_pair_count(NULL) == 0);
     ASSERT(rp_world_get_contact_pairs(NULL, pbuf, 4) == 0);
+
+    bool found = true;
+    RpVec2 cp = rp_query_find_clear_point(NULL, 0, 0, 10, 2, 0x3, 0xFFFFFFFF, 0, 100, &found);
+    ASSERT(found == false);
+    ASSERT(cp.x == 0.0f && cp.y == 0.0f);
 }
 
 /* ------------------------------------------------------------------ */
@@ -834,6 +902,7 @@ int main(void) {
     RUN_TEST(test_collision_callbacks);
     RUN_TEST(test_log_callback);
     RUN_TEST(test_group_filtering_queries);
+    RUN_TEST(test_find_clear_point_determinism);
     RUN_TEST(test_null_safety);
 
     printf("\n========================================\n");

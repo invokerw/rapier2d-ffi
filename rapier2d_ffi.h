@@ -555,6 +555,38 @@ uint32_t rp_query_intersect_capsule(const struct RpWorld *world,
                                     uint32_t max_results);
 
 /**
+ * 在指定圆形区域内寻找一个"空旷"的点，该点周围 `r2` 半径内没有指定类型的碰撞体。
+ *
+ * 算法：在搜索圆 (x, y, r) 内采样候选点，对每个候选点做半径 `r2` 的圆形区域查询，
+ * 如果查询结果中没有匹配 `ignore_collider_types` 的碰撞体，则返回该点。
+ *
+ * - `x`, `y`: 搜索圆心
+ * - `r`: 搜索半径
+ * - `r2`: 清空半径（该点周围多大范围内不能有碰撞体）
+ * - `ignore_collider_types`: 位掩码，指定要避开的碰撞体类型
+ *   - bit 0 (0x1): 避开实体碰撞体（Solid, collider_type == 0）
+ *   - bit 1 (0x2): 避开传感器碰撞体（Sensor, collider_type != 0）
+ *   - 0x3: 避开所有碰撞体
+ * - `group`: 碰撞组过滤位掩码
+ * - `mode`: 采样模式
+ *   - 0 = 均匀随机采样（搜索圆内各处概率相同）
+ *   - 1 = 优先靠近中心（先尝试中心点，然后逐渐向外扩展）
+ * - `max_attempts`: 最大尝试次数
+ * - `out_found`: 输出是否成功找到有效点（true = 找到，false = 未找到）
+ * - 返回值: 找到的空旷点坐标；如果未找到，返回 (0, 0)
+ */
+struct RpVec2 rp_query_find_clear_point(const struct RpWorld *world,
+                                        float x,
+                                        float y,
+                                        float r,
+                                        float r2,
+                                        uint32_t ignore_collider_types,
+                                        uint32_t group,
+                                        int32_t mode,
+                                        uint32_t max_attempts,
+                                        bool *out_found);
+
+/**
  * 返回上一次 step 后的接触对数量。
  */
 uint32_t rp_world_contact_pair_count(const struct RpWorld *world);
