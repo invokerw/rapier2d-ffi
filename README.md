@@ -88,7 +88,7 @@ cc -o test/test_rapier2d test/test_rapier2d.c \
 LD_LIBRARY_PATH=target/release ./test/test_rapier2d
 ```
 
-测试包含 26 个场景、137 个断言，覆盖所有 API 功能、确定性验证和 NULL 安全。
+测试包含 27 个场景、154 个断言，覆盖所有 API 功能、确定性验证和 NULL 安全。
 
 ### 可视化测试（raylib）
 
@@ -295,8 +295,9 @@ uint32_t rp_query_intersect_circle(world, x, y, radius, group, out, max);       
 uint32_t rp_query_intersect_rect(world, x, y, angle, half_w, half_h, group, out, max); // 矩形区域
 uint32_t rp_query_intersect_capsule(world, x, y, angle, half_h, radius, group, out, max); // 胶囊区域
 
-// 寻找空旷点（在圆形区域内找到周围无指定类型碰撞体的点）
-RpVec2   rp_query_find_clear_point(world, x, y, r, r2, ignore_types, group, mode, max_attempts, &found);
+// 寻找空旷点
+RpVec2   rp_query_find_clear_point(world, x, y, r, r2, ignore_types, group, mode, max_attempts, &found);          // 圆形搜索区域
+RpVec2   rp_query_find_clear_point_in_rect(world, rect_x, rect_y, rect_w, rect_h, r2, ignore_types, group, mode, max_attempts, &found); // 矩形搜索区域
 
 // 接触对
 uint32_t rp_world_contact_pair_count(world);                     // 接触对数量
@@ -311,7 +312,9 @@ void rp_register_log_callback(RpLogCallback cb);   // 传 NULL 禁用日志
 
 ### 寻找空旷点
 
-在指定圆形区域内寻找一个"空旷"的点，该点周围 `r2` 半径内没有指定类型的碰撞体。使用确定性伪随机采样，相同参数多次调用返回相同结果。
+在搜索区域内寻找一个"空旷"的点，该点周围 `r2` 半径内没有指定类型的碰撞体。使用确定性伪随机采样，相同参数多次调用返回相同结果。提供两个变体：
+
+**圆形搜索区域：**
 
 ```c
 bool found;
@@ -331,6 +334,26 @@ if (found) {
 }
 ```
 
+**矩形搜索区域：**
+
+```c
+bool found;
+RpVec2 point = rp_query_find_clear_point_in_rect(
+    world,
+    -10.0f, -5.0f,  // 搜索矩形左下角坐标 (rect_x, rect_y)
+    20.0f, 10.0f,   // 搜索矩形宽度和高度 (rect_w, rect_h)
+    2.0f,            // 清空半径 r2
+    0x1,             // ignore_collider_types（见下表）
+    0xFFFFFFFF,      // 碰撞组过滤
+    0,               // mode: 0=均匀随机, 1=优先靠近中心
+    100,             // 最大尝试次数
+    &found           // 输出：是否找到
+);
+if (found) {
+    // 使用 point.x, point.y
+}
+```
+
 **`ignore_collider_types` 位掩码：**
 
 | 值 | 含义 |
@@ -339,12 +362,12 @@ if (found) {
 | `0x2` | 避开传感器碰撞体（Sensor, collider_type != 0） |
 | `0x3` | 避开所有碰撞体 |
 
-**`mode` 采样模式：**
+**`mode` 采样模式（两个变体均支持）：**
 
 | 值 | 策略 | 适用场景 |
 |----|------|---------|
-| `0` | 均匀随机采样（搜索圆内各处概率相同） | 随机刷怪、随机放置物品 |
-| `1` | 优先靠近中心（先尝试圆心，逐渐向外扩展） | 围绕目标点生成、就近寻找空位 |
+| `0` | 均匀随机采样（搜索区域内各处概率相同） | 随机刷怪、随机放置物品 |
+| `1` | 优先靠近中心（先尝试中心点，逐渐向外扩展） | 围绕目标点生成、就近寻找空位 |
 
 ## 碰撞组
 
@@ -382,9 +405,10 @@ rapier2d-ffi/
 ├── cbindgen.toml                 # cbindgen 配置
 ├── src/
 │   └── lib.rs                    # FFI 实现
-├── rapier2d_ffi.h                # 自动生成的 C 头文件
+├── rapier2d_ffi.h                # 自动生成的 C 头文件（勿手动编辑）
+├── CLAUDE.md                     # Claude Code 工作指南
 ├── test/
-│   ├── test_rapier2d.c           # C 单元测试（26 个场景，137 个断言）
+│   ├── test_rapier2d.c           # C 单元测试（27 个场景，154 个断言）
 │   ├── visual_test.c             # raylib 可视化测试
 │   └── build_visual_test.sh      # 可视化测试编译脚本
 └── README.md

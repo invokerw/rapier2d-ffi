@@ -1636,6 +1636,111 @@ pub unsafe extern "C" fn rp_query_find_clear_point(
     RpVec2::default()
 }
 
+/// 在指定长方形区域内寻找一个"空旷"的点，该点周围 `r2` 半径内没有指定类型的碰撞体。
+///
+/// - `rect_x`, `rect_y`: 搜索矩形左下角坐标
+/// - `rect_w`, `rect_h`: 搜索矩形的宽度和高度
+/// - `r2`: 清空半径（候选点周围多大范围内不能有碰撞体）
+/// - `ignore_collider_types`: 位掩码，指定要避开的碰撞体类型
+///   - bit 0 (0x1): 避开实体碰撞体（Solid）
+///   - bit 1 (0x2): 避开传感器碰撞体（Sensor）
+/// - `group`: 碰撞组过滤位掩码
+/// - `mode`: 采样模式
+///   - 0 = 均匀随机采样
+///   - 1 = 优先靠近中心（先尝试矩形中心，再随机扩展）
+/// - `max_attempts`: 最大尝试次数
+/// - `out_found`: 输出是否成功找到有效点
+/// - 返回值: 找到的空旷点坐标；如果未找到，返回 (0, 0)
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rp_query_find_clear_point_in_rect(
+    world: *const RpWorld,
+    rect_x: f32,
+    rect_y: f32,
+    rect_w: f32,
+    rect_h: f32,
+    r2: f32,
+    ignore_collider_types: u32,
+    group: u32,
+    mode: i32,
+    max_attempts: u32,
+    out_found: *mut bool,
+) -> RpVec2 {
+    if world.is_null() {
+        if !out_found.is_null() {
+            *out_found = false;
+        }
+        return RpVec2::default();
+    }
+    let w = &*world;
+
+    let seed = (rect_x.to_bits() ^ rect_y.to_bits() ^ rect_w.to_bits() ^ rect_h.to_bits())
+        .wrapping_add(1);
+    let mut rng_state = if seed == 0 { 1u32 } else { seed };
+
+    let filter = QueryFilter::default()
+        .groups(InteractionGroups::new(Group::ALL, group.into(), InteractionTestMode::And));
+
+    let shape = Ball::new(r2);
+
+    let cx = rect_x + rect_w * 0.5;
+    let cy = rect_y + rect_h * 0.5;
+
+    for i in 0..max_attempts {
+        let (px, py) = match mode {
+            // mode 1: 优先靠近中心，逐渐向外扩展
+            1 => {
+                if i == 0 {
+                    (cx, cy)
+                } else {
+                    let t = i as f32 / max_attempts as f32;
+                    let ox = (rand_f32(&mut rng_state) - 0.5) * rect_w * t;
+                    let oy = (rand_f32(&mut rng_state) - 0.5) * rect_h * t;
+                    (cx + ox, cy + oy)
+                }
+            }
+            // mode 0 (默认): 矩形内均匀随机采样
+            _ => {
+                let px = rect_x + rand_f32(&mut rng_state) * rect_w;
+                let py = rect_y + rand_f32(&mut rng_state) * rect_h;
+                (px, py)
+            }
+        };
+
+        let shape_pos = Pose::translation(px, py);
+        let qp = w.broad_phase.as_query_pipeline(
+            w.narrow_phase.query_dispatcher(),
+            &w.bodies,
+            &w.colliders,
+            filter,
+        );
+
+        let mut found_blocking = false;
+        for (handle, _) in qp.intersect_shape(shape_pos, &shape) {
+            if let Some(co) = w.colliders.get(handle) {
+                let is_sensor = co.is_sensor();
+                if (!is_sensor && (ignore_collider_types & 0x1) != 0)
+                    || (is_sensor && (ignore_collider_types & 0x2) != 0)
+                {
+                    found_blocking = true;
+                    break;
+                }
+            }
+        }
+
+        if !found_blocking {
+            if !out_found.is_null() {
+                *out_found = true;
+            }
+            return RpVec2 { x: px, y: py };
+        }
+    }
+
+    if !out_found.is_null() {
+        *out_found = false;
+    }
+    RpVec2::default()
+}
+
 // ---------------------------------------------------------------------------
 // 接触对遍历（在 step 之后使用）
 // ---------------------------------------------------------------------------

@@ -807,7 +807,76 @@ static void test_find_clear_point_determinism(void) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  24. NULL world safety — no crashes                                 */
+/*  24. find_clear_point_in_rect                                       */
+/* ------------------------------------------------------------------ */
+
+static void test_find_clear_point_in_rect(void) {
+    RpWorld *w = rp_world_create(0.0f, -9.81f, NULL, NULL);
+
+    /* 放置一些障碍物 */
+    rp_collider_create_circle(w,  3.0f,  2.0f, 1.0f, 0, 0, 0xFFFFFFFF);
+    rp_collider_create_circle(w, -2.0f,  1.0f, 1.5f, 0, 0, 0xFFFFFFFF);
+    rp_collider_create_rect  (w,  0.0f, -1.0f, 0.0f, 2.0f, 0.5f, 0, 0, 0xFFFFFFFF);
+    rp_collider_create_circle(w,  1.0f,  3.0f, 0.8f, 1, 0, 0xFFFFFFFF); /* sensor */
+
+    /* ---- mode 0 确定性：相同参数两次结果相同 ---- */
+    bool found1, found2;
+    /* 搜索矩形：左下角 (-5, -5)，宽高 10x10 */
+    RpVec2 p1 = rp_query_find_clear_point_in_rect(w, -5.0f, -5.0f, 10.0f, 10.0f, 1.5f, 0x3, 0xFFFFFFFF, 0, 200, &found1);
+    RpVec2 p2 = rp_query_find_clear_point_in_rect(w, -5.0f, -5.0f, 10.0f, 10.0f, 1.5f, 0x3, 0xFFFFFFFF, 0, 200, &found2);
+    ASSERT(found1 == found2);
+    if (found1 && found2) {
+        ASSERT_FLOAT_EQ(p1.x, p2.x);
+        ASSERT_FLOAT_EQ(p1.y, p2.y);
+    }
+
+    /* ---- mode 1 确定性 ---- */
+    RpVec2 p3 = rp_query_find_clear_point_in_rect(w, -5.0f, -5.0f, 10.0f, 10.0f, 1.5f, 0x3, 0xFFFFFFFF, 1, 200, &found1);
+    RpVec2 p4 = rp_query_find_clear_point_in_rect(w, -5.0f, -5.0f, 10.0f, 10.0f, 1.5f, 0x3, 0xFFFFFFFF, 1, 200, &found2);
+    ASSERT(found1 == found2);
+    if (found1 && found2) {
+        ASSERT_FLOAT_EQ(p3.x, p4.x);
+        ASSERT_FLOAT_EQ(p3.y, p4.y);
+    }
+
+    /* ---- mode 1 结果应在搜索矩形内 ---- */
+    if (found1) {
+        ASSERT(p3.x >= -5.0f - 1e-3f && p3.x <= 5.0f + 1e-3f);
+        ASSERT(p3.y >= -5.0f - 1e-3f && p3.y <= 5.0f + 1e-3f);
+    }
+
+    /* ---- mode 0 结果应在搜索矩形内 ---- */
+    if (found1) {
+        ASSERT(p1.x >= -5.0f - 1e-3f && p1.x <= 5.0f + 1e-3f);
+        ASSERT(p1.y >= -5.0f - 1e-3f && p1.y <= 5.0f + 1e-3f);
+    }
+
+    /* ---- 不同搜索区域，种子不同，结果不同 ---- */
+    bool found3;
+    RpVec2 p5 = rp_query_find_clear_point_in_rect(w, 0.0f, 0.0f, 10.0f, 10.0f, 1.5f, 0x3, 0xFFFFFFFF, 0, 200, &found3);
+    if (found1 && found3) {
+        ASSERT(fabsf(p1.x - p5.x) > 1e-3f || fabsf(p1.y - p5.y) > 1e-3f);
+    }
+
+    /* ---- ignore_collider_types: 只避 solid，应仍能找到点 ---- */
+    bool found_solid_only;
+    rp_query_find_clear_point_in_rect(w, -5.0f, -5.0f, 10.0f, 10.0f, 1.5f, 0x1, 0xFFFFFFFF, 1, 200, &found_solid_only);
+    ASSERT(found_solid_only);
+
+    /* ---- 空世界一定能找到，且在矩形内 ---- */
+    RpWorld *empty = rp_world_create(0.0f, 0.0f, NULL, NULL);
+    bool found_empty;
+    RpVec2 pe = rp_query_find_clear_point_in_rect(empty, -3.0f, -3.0f, 6.0f, 6.0f, 0.5f, 0x3, 0xFFFFFFFF, 0, 10, &found_empty);
+    ASSERT(found_empty);
+    ASSERT(pe.x >= -3.0f - 1e-3f && pe.x <= 3.0f + 1e-3f);
+    ASSERT(pe.y >= -3.0f - 1e-3f && pe.y <= 3.0f + 1e-3f);
+    rp_world_destroy(empty);
+
+    rp_world_destroy(w);
+}
+
+/* ------------------------------------------------------------------ */
+/*  25. NULL world safety — no crashes                                 */
 /* ------------------------------------------------------------------ */
 
 static void test_null_safety(void) {
@@ -867,6 +936,11 @@ static void test_null_safety(void) {
     RpVec2 cp = rp_query_find_clear_point(NULL, 0, 0, 10, 2, 0x3, 0xFFFFFFFF, 0, 100, &found);
     ASSERT(found == false);
     ASSERT(cp.x == 0.0f && cp.y == 0.0f);
+
+    found = true;
+    RpVec2 cp2 = rp_query_find_clear_point_in_rect(NULL, -5, -5, 10, 10, 2, 0x3, 0xFFFFFFFF, 0, 100, &found);
+    ASSERT(found == false);
+    ASSERT(cp2.x == 0.0f && cp2.y == 0.0f);
 }
 
 /* ------------------------------------------------------------------ */
@@ -903,6 +977,7 @@ int main(void) {
     RUN_TEST(test_log_callback);
     RUN_TEST(test_group_filtering_queries);
     RUN_TEST(test_find_clear_point_determinism);
+    RUN_TEST(test_find_clear_point_in_rect);
     RUN_TEST(test_null_safety);
 
     printf("\n========================================\n");
