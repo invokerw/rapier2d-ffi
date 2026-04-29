@@ -88,7 +88,7 @@ cc -o test/test_rapier2d test/test_rapier2d.c \
 LD_LIBRARY_PATH=target/release ./test/test_rapier2d
 ```
 
-测试包含 27 个场景、154 个断言，覆盖所有 API 功能、确定性验证和 NULL 安全。
+测试包含 28 个场景、163 个断言，覆盖所有 API 功能、确定性验证和 NULL 安全。
 
 ### 可视化测试（raylib）
 
@@ -189,10 +189,21 @@ int main(void) {
 RpWorld *rp_world_create(gravity_x, gravity_y, start_cb, stop_cb);  // 创建世界
 void     rp_world_destroy(RpWorld *world);                           // 销毁世界
 void     rp_world_step(RpWorld *world);                              // 步进一帧
+void     rp_world_update_query_pipeline(RpWorld *world);             // 刷新查询用的 BVH（见下文）
 void     rp_world_set_timestep(RpWorld *world, float dt);            // 设置时间步长，默认 1/60
 void     rp_world_set_gravity(RpWorld *world, float x, float y);    // 设置重力
 uint32_t rp_world_collider_count(const RpWorld *world);              // 碰撞体数量
 ```
+
+**关于 `rp_world_update_query_pipeline`：** 新创建的碰撞体，以及通过 `rp_collider_set_position / set_rotation / set_pose` 移动过的碰撞体，在下一次 `rp_world_step` 之前都不会出现在宽相 BVH 中——射线检测、形状投射、点/区域查询都找不到它们。如果需要在不推进物理模拟的前提下立即查询刚创建或移动后的碰撞体，就在查询前调用一次此函数：
+
+```c
+rp_collider_create_circle(world, 5, 0, 1, 0, 0, 0xFFFFFFFF);
+rp_world_update_query_pipeline(world);  // 把新 collider 塞进 BVH
+rp_query_ray_cast(world, 0, 0, 1, 0, 10, 0xFFFFFFFF);  // 现在能命中
+```
+
+此函数只刷新查询索引，不会推进模拟、不会触发碰撞回调。`rp_world_step` 会自动完成同样的刷新，因此正常的「每帧 step」循环里不需要调它。
 
 ### 碰撞体创建
 
@@ -408,7 +419,7 @@ rapier2d-ffi/
 ├── rapier2d_ffi.h                # 自动生成的 C 头文件（勿手动编辑）
 ├── CLAUDE.md                     # Claude Code 工作指南
 ├── test/
-│   ├── test_rapier2d.c           # C 单元测试（27 个场景，154 个断言）
+│   ├── test_rapier2d.c           # C 单元测试（28 个场景，163 个断言）
 │   ├── visual_test.c             # raylib 可视化测试
 │   └── build_visual_test.sh      # 可视化测试编译脚本
 └── README.md

@@ -876,7 +876,51 @@ static void test_find_clear_point_in_rect(void) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  25. NULL world safety — no crashes                                 */
+/*  25. Update query pipeline makes new/moved colliders queryable      */
+/*      without needing a full physics step                            */
+/* ------------------------------------------------------------------ */
+
+static void test_update_query_pipeline(void) {
+    RpWorld *w = rp_world_create(0.0f, 0.0f, NULL, NULL);
+
+    /* Freshly added collider should not be findable before BVH is refreshed. */
+    RpHandle c = rp_collider_create_circle(w, 5, 0, 1, 0, 0, 0xFFFFFFFF);
+    RpRayHit rh = rp_query_ray_cast(w, 0, 0, 1, 0, 10, 0xFFFFFFFF);
+    ASSERT(!rh.hit);
+
+    /* After refresh, the collider is in the BVH and queries hit it. */
+    rp_world_update_query_pipeline(w);
+    rh = rp_query_ray_cast(w, 0, 0, 1, 0, 10, 0xFFFFFFFF);
+    ASSERT(rh.hit);
+    ASSERT(rh.handle.id == c.id);
+
+    /* intersect / point-in-shape queries also work without step. */
+    RpHandle pt_hit = rp_query_point_intersect(w, 5, 0, 0xFFFFFFFF);
+    ASSERT(rp_handle_is_valid(w, pt_hit));
+    ASSERT(pt_hit.id == c.id);
+
+    RpHandle buf[4];
+    uint32_t n = rp_query_intersect_circle(w, 5, 0, 0.5f, 0xFFFFFFFF, buf, 4);
+    ASSERT(n == 1);
+
+    /* Moving a collider requires another refresh before queries see it. */
+    rp_collider_set_position(w, c, 100, 0);
+    rh = rp_query_ray_cast(w, 99, 0, 1, 0, 5, 0xFFFFFFFF);
+    ASSERT(!rh.hit); /* BVH still has old AABB */
+
+    rp_world_update_query_pipeline(w);
+    rh = rp_query_ray_cast(w, 99, 0, 1, 0, 5, 0xFFFFFFFF);
+    ASSERT(rh.hit);
+    ASSERT(rh.handle.id == c.id);
+
+    /* NULL safety. */
+    rp_world_update_query_pipeline(NULL);
+
+    rp_world_destroy(w);
+}
+
+/* ------------------------------------------------------------------ */
+/*  26. NULL world safety — no crashes                                 */
 /* ------------------------------------------------------------------ */
 
 static void test_null_safety(void) {
@@ -978,6 +1022,7 @@ int main(void) {
     RUN_TEST(test_group_filtering_queries);
     RUN_TEST(test_find_clear_point_determinism);
     RUN_TEST(test_find_clear_point_in_rect);
+    RUN_TEST(test_update_query_pipeline);
     RUN_TEST(test_null_safety);
 
     printf("\n========================================\n");

@@ -178,6 +178,24 @@ void rp_world_set_timestep(struct RpWorld *world, float dt);
 void rp_world_set_gravity(struct RpWorld *world, float x, float y);
 
 /**
+ * 刷新空间查询所使用的宽相 BVH。
+ *
+ * 新创建或者被 `rp_collider_set_position / set_rotation / set_pose` 移动过的碰撞体，
+ * 在下一次 `rp_world_step` 被调用之前不会出现在 BVH 中，因此射线检测、形状投射、
+ * 区域相交查询都不会命中它们。调用这个函数可以在不推进物理模拟的情况下，把刚体
+ * 最新位姿同步到其 collider，并把每个启用中的 collider 的 AABB 推送进 BVH。
+ *
+ * 典型用法：
+ *   rp_collider_create_*(...);
+ *   rp_world_update_query_pipeline(world);
+ *   rp_query_*(...);
+ *
+ * 注意：此函数只刷新查询索引，不触发碰撞事件。碰撞事件仍然只在 `rp_world_step` 中触发。
+ * 该函数的复杂度为 O(N)，N = 世界中 collider 总数，建议批量添加后再一次性调用。
+ */
+void rp_world_update_query_pipeline(struct RpWorld *world);
+
+/**
  * 返回当前世界中碰撞体的数量。
  */
 uint32_t rp_world_collider_count(const struct RpWorld *world);

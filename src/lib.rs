@@ -356,6 +356,63 @@ pub unsafe extern "C" fn rp_world_set_gravity(world: *mut RpWorld, x: f32, y: f3
     (*world).gravity = Vector::new(x, y);
 }
 
+/// 刷新空间查询所使用的宽相 BVH。
+///
+/// 新创建或者被 `rp_collider_set_position / set_rotation / set_pose` 移动过的碰撞体，
+/// 在下一次 `rp_world_step` 被调用之前不会出现在 BVH 中，因此射线检测、形状投射、
+/// 区域相交查询都不会命中它们。调用这个函数可以在不推进物理模拟的情况下，把刚体
+/// 最新位姿同步到其 collider，并把每个启用中的 collider 的 AABB 推送进 BVH。
+///
+/// 典型用法：
+///   rp_collider_create_*(...);
+///   rp_world_update_query_pipeline(world);
+///   rp_query_*(...);
+///
+/// 注意：此函数只刷新查询索引，不触发碰撞事件。碰撞事件仍然只在 `rp_world_step` 中触发。
+/// 该函数的复杂度为 O(N)，N = 世界中 collider 总数，建议批量添加后再一次性调用。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rp_world_update_query_pipeline(world: *mut RpWorld) {
+    if world.is_null() {
+        return;
+    }
+    let w = &mut *world;
+
+    // 第一步：把刚体最新位姿同步到其 collider。
+    // rp_collider_set_position 等函数只改了父刚体的 pose，没改 collider.pos；
+    // 而 BVH 更新是基于 collider.pos 计算 AABB 的。
+    let bodies_ref = &w.bodies;
+    let parent_updates: Vec<(ColliderHandle, Pose)> = w
+        .colliders
+        .iter()
+        .filter_map(|(h, co)| {
+            let parent = co.parent()?;
+            let body = bodies_ref.get(parent)?;
+            let pos_wrt_parent = *co.position_wrt_parent()?;
+            Some((h, *body.position() * pos_wrt_parent))
+        })
+        .collect();
+    for (h, new_pose) in parent_updates {
+        if let Some(co) = w.colliders.get_mut(h) {
+            co.set_position(new_pose);
+        }
+    }
+
+    // 第二步：把每个 collider 的 AABB 推进 BVH。
+    // 使用 `broad_phase.set_aabb` 而不是 `broad_phase.update`：
+    // set_aabb 不会消费 `ColliderSet` 里的 modified_colliders 列表，因此后续
+    // `rp_world_step` 仍然能正常识别这些 collider、生成碰撞事件。
+    let handles: Vec<ColliderHandle> = w.colliders.iter().map(|(h, _)| h).collect();
+    for h in handles {
+        if let Some(co) = w.colliders.get(h) {
+            if !co.is_enabled() {
+                continue;
+            }
+            let aabb = co.compute_broad_phase_aabb(&w.integration_params, &w.bodies);
+            w.broad_phase.set_aabb(&w.integration_params, h, aabb);
+        }
+    }
+}
+
 /// 返回当前世界中碰撞体的数量。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rp_world_collider_count(world: *const RpWorld) -> u32 {
