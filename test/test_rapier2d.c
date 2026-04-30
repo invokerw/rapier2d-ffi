@@ -876,6 +876,75 @@ static void test_find_clear_point_in_rect(void) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  24b. Reproduce: find_clear_point returns the same point after the  */
+/*       caller has already placed a collider there.                   */
+/*                                                                     */
+/*  Root cause: newly-created colliders are not in the broad-phase BVH */
+/*  until the next rp_world_step — OR until rp_world_update_query_     */
+/*  pipeline is called. The deterministic seed in find_clear_point     */
+/*  makes this worse: same (x, y, r) => same candidate sequence =>     */
+/*  same first "clear" point gets reported.                            */
+/* ------------------------------------------------------------------ */
+
+static void test_find_clear_point_sees_new_colliders(void) {
+    RpWorld *w = rp_world_create(0.0f, 0.0f, NULL, NULL);
+
+    /* An existing obstacle off to one side so the search isn't trivial. */
+    rp_collider_create_circle(w, 4.0f, 4.0f, 0.5f, 0, 0, 0xFFFFFFFF);
+    rp_world_update_query_pipeline(w);
+
+    /* 1) First query picks some point p1. */
+    bool found1 = false;
+    RpVec2 p1 = rp_query_find_clear_point(
+        w, 0.0f, 0.0f, 5.0f, 1.0f, 0x3, 0xFFFFFFFF, 0, 200, &found1);
+    ASSERT(found1);
+
+    /* 2) Place a collider exactly at p1 — simulating the user's workflow. */
+    RpHandle blocker = rp_collider_create_circle(
+        w, p1.x, p1.y, 1.0f, 0, 0, 0xFFFFFFFF);
+    ASSERT(rp_handle_is_valid(w, blocker));
+
+    /* 3) Bug reproduction: without refreshing the BVH, the same query */
+    /*    parameters produce the same deterministic candidate sequence, */
+    /*    and the new collider is invisible to the query — so p2 == p1. */
+    bool found2 = false;
+    RpVec2 p2 = rp_query_find_clear_point(
+        w, 0.0f, 0.0f, 5.0f, 1.0f, 0x3, 0xFFFFFFFF, 0, 200, &found2);
+    ASSERT(found2);
+    ASSERT_FLOAT_EQ(p2.x, p1.x);
+    ASSERT_FLOAT_EQ(p2.y, p1.y);    /* <-- this is the bug the user hit */
+
+    /* 4) Fix: refresh the BVH so the new collider is visible to queries. */
+    rp_world_update_query_pipeline(w);
+
+    bool found3 = false;
+    RpVec2 p3 = rp_query_find_clear_point(
+        w, 0.0f, 0.0f, 5.0f, 1.0f, 0x3, 0xFFFFFFFF, 0, 200, &found3);
+    ASSERT(found3);
+    /* Now the query sees the blocker and must pick a different point. */
+    ASSERT(fabsf(p3.x - p1.x) > 1e-3f || fabsf(p3.y - p1.y) > 1e-3f);
+
+    /* Sanity: the new point is outside the blocker's clear radius. */
+    float dx = p3.x - p1.x, dy = p3.y - p1.y;
+    ASSERT(sqrtf(dx*dx + dy*dy) >= 1.0f - 1e-3f);
+
+    /* 5) rp_world_step also refreshes the BVH, so it's another valid fix. */
+    RpHandle blocker2 = rp_collider_create_circle(
+        w, p3.x, p3.y, 1.0f, 0, 0, 0xFFFFFFFF);
+    ASSERT(rp_handle_is_valid(w, blocker2));
+    rp_world_step(w);
+
+    bool found4 = false;
+    RpVec2 p4 = rp_query_find_clear_point(
+        w, 0.0f, 0.0f, 5.0f, 1.0f, 0x3, 0xFFFFFFFF, 0, 200, &found4);
+    ASSERT(found4);
+    ASSERT(fabsf(p4.x - p1.x) > 1e-3f || fabsf(p4.y - p1.y) > 1e-3f);
+    ASSERT(fabsf(p4.x - p3.x) > 1e-3f || fabsf(p4.y - p3.y) > 1e-3f);
+
+    rp_world_destroy(w);
+}
+
+/* ------------------------------------------------------------------ */
 /*  25. Update query pipeline makes new/moved colliders queryable      */
 /*      without needing a full physics step                            */
 /* ------------------------------------------------------------------ */
@@ -1022,6 +1091,7 @@ int main(void) {
     RUN_TEST(test_group_filtering_queries);
     RUN_TEST(test_find_clear_point_determinism);
     RUN_TEST(test_find_clear_point_in_rect);
+    RUN_TEST(test_find_clear_point_sees_new_colliders);
     RUN_TEST(test_update_query_pipeline);
     RUN_TEST(test_null_safety);
 
