@@ -294,8 +294,10 @@ RpRayHitWithNormal rp_query_ray_cast_with_normal(world, ox, oy, dx, dy, max_toi,
 uint32_t           rp_query_ray_cast_all(world, ox, oy, dx, dy, max_toi, group, out, max); // 穿透所有
 
 // 形状投射（圆形扫掠，类似"胖射线"；已穿透时不会在 toi=0 处阻塞，允许逃离重叠）
-RpRayHit           rp_query_shape_cast_circle(world, ox, oy, dx, dy, max_toi, radius, group);             // 最近命中
-RpRayHitWithNormal rp_query_shape_cast_circle_with_normal(world, ox, oy, dx, dy, max_toi, radius, group); // 附带法线
+// `exclude_handle` 用于把某个 collider 从结果中排除（例如排除投射者自身）；
+// 不需要排除时传 `{0xFFFFFFFF, 0xFFFFFFFF}`（即 RpHandle::invalid()）。
+RpRayHit           rp_query_shape_cast_circle(world, ox, oy, dx, dy, max_toi, radius, group, exclude_handle);             // 最近命中
+RpRayHitWithNormal rp_query_shape_cast_circle_with_normal(world, ox, oy, dx, dy, max_toi, radius, group, exclude_handle); // 附带法线
 
 // 相交测试
 bool     rp_query_intersection_test(world, handle_a, handle_b);  // 两个碰撞体是否相交

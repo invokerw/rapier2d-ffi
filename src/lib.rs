@@ -1267,6 +1267,8 @@ pub unsafe extern "C" fn rp_query_ray_cast_all(
 /// 这相当于"粗射线检测"（thick raycast）/ 扫掠测试（sweep test）。
 /// 可以理解为：一个圆形沿着路径滑动，看它最先碰到什么。
 /// - `radius`: 投射的圆形半径
+/// - `exclude_handle`: 要从结果中排除的碰撞体句柄（常用于让物体避免检测到自身）。
+///   传入 `RpHandle::invalid()`（id 和 generation 都是 u32::MAX）表示不排除任何 collider。
 /// - 其他参数与射线检测类似
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rp_query_shape_cast_circle(
@@ -1278,6 +1280,7 @@ pub unsafe extern "C" fn rp_query_shape_cast_circle(
     max_toi: f32,
     radius: f32,
     group: u32,
+    exclude_handle: RpHandle,
 ) -> RpRayHit {
     let no_hit = RpRayHit {
         handle: RpHandle::invalid(),
@@ -1291,8 +1294,12 @@ pub unsafe extern "C" fn rp_query_shape_cast_circle(
     let shape = Ball::new(radius);                      // 创建一个圆形
     let shape_pos = Pose::translation(origin_x, origin_y); // 圆形的初始位置
     let velocity = Vector::new(dir_x, dir_y);              // 圆形移动的方向和速度
-    let filter = QueryFilter::default()
+    let mut filter = QueryFilter::default()
         .groups(InteractionGroups::new(Group::ALL, group.into(), InteractionTestMode::And));
+    // RpHandle::invalid() 的两个字段都是 u32::MAX，只有两者都为 MAX 才视为无效哨兵
+    if exclude_handle.id != u32::MAX || exclude_handle.generation != u32::MAX {
+        filter = filter.exclude_collider(exclude_handle.to_collider());
+    }
     let qp = w.broad_phase.as_query_pipeline(
         w.narrow_phase.query_dispatcher(),
         &w.bodies,
@@ -1318,6 +1325,8 @@ pub unsafe extern "C" fn rp_query_shape_cast_circle(
 
 /// 将一个圆形沿指定方向投射，返回第一个碰到的碰撞体，同时包含碰撞点和表面法线。
 /// 比 rp_query_shape_cast_circle 提供更多信息（法线和碰撞点），适用于需要反弹方向等场景。
+/// - `exclude_handle`: 要从结果中排除的碰撞体句柄（常用于让物体避免检测到自身）。
+///   传入 `RpHandle::invalid()` 表示不排除任何 collider。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rp_query_shape_cast_circle_with_normal(
     world: *const RpWorld,
@@ -1328,6 +1337,7 @@ pub unsafe extern "C" fn rp_query_shape_cast_circle_with_normal(
     max_toi: f32,
     radius: f32,
     group: u32,
+    exclude_handle: RpHandle,
 ) -> RpRayHitWithNormal {
     let no_hit = RpRayHitWithNormal {
         handle: RpHandle::invalid(),
@@ -1343,8 +1353,12 @@ pub unsafe extern "C" fn rp_query_shape_cast_circle_with_normal(
     let shape = Ball::new(radius);
     let shape_pos = Pose::translation(origin_x, origin_y);
     let velocity = Vector::new(dir_x, dir_y);
-    let filter = QueryFilter::default()
+    let mut filter = QueryFilter::default()
         .groups(InteractionGroups::new(Group::ALL, group.into(), InteractionTestMode::And));
+    // RpHandle::invalid() 的两个字段都是 u32::MAX，只有两者都为 MAX 才视为无效哨兵
+    if exclude_handle.id != u32::MAX || exclude_handle.generation != u32::MAX {
+        filter = filter.exclude_collider(exclude_handle.to_collider());
+    }
     let qp = w.broad_phase.as_query_pipeline(
         w.narrow_phase.query_dispatcher(),
         &w.bodies,

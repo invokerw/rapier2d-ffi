@@ -461,19 +461,20 @@ static void test_raycast_all(void) {
 
 static void test_shape_cast_circle(void) {
     RpWorld *w = rp_world_create(0.0f, 0.0f, NULL, NULL);
+    RpHandle no_exclude = {0xFFFFFFFF, 0xFFFFFFFF};
 
     /* a wall at x=10 */
     rp_collider_create_rect(w, 10, 0, 0, 0.5f, 5, 0, 0, 0xFFFFFFFF);
     rp_world_step(w);
 
     /* sweep a circle (radius=1) from origin going right */
-    RpRayHit hit = rp_query_shape_cast_circle(w, 0, 0, 1, 0, 100, 1.0f, 0xFFFFFFFF);
+    RpRayHit hit = rp_query_shape_cast_circle(w, 0, 0, 1, 0, 100, 1.0f, 0xFFFFFFFF, no_exclude);
     ASSERT(hit.hit == true);
     /* should hit at toi ~ 8.5 (wall edge at 9.5, minus circle radius 1) */
     ASSERT_FLOAT_EQ(hit.toi, 8.5f);
 
     /* sweep in opposite direction should miss */
-    RpRayHit miss = rp_query_shape_cast_circle(w, 0, 0, -1, 0, 100, 1.0f, 0xFFFFFFFF);
+    RpRayHit miss = rp_query_shape_cast_circle(w, 0, 0, -1, 0, 100, 1.0f, 0xFFFFFFFF, no_exclude);
     ASSERT(miss.hit == false);
 
     rp_world_destroy(w);
@@ -485,13 +486,14 @@ static void test_shape_cast_circle(void) {
 
 static void test_shape_cast_circle_with_normal(void) {
     RpWorld *w = rp_world_create(0.0f, 0.0f, NULL, NULL);
+    RpHandle no_exclude = {0xFFFFFFFF, 0xFFFFFFFF};
 
     /* a wall at x=10 */
     rp_collider_create_rect(w, 10, 0, 0, 0.5f, 5, 0, 0, 0xFFFFFFFF);
     rp_world_step(w);
 
     /* sweep a circle (radius=1) from origin going right */
-    RpRayHitWithNormal hit = rp_query_shape_cast_circle_with_normal(w, 0, 0, 1, 0, 100, 1.0f, 0xFFFFFFFF);
+    RpRayHitWithNormal hit = rp_query_shape_cast_circle_with_normal(w, 0, 0, 1, 0, 100, 1.0f, 0xFFFFFFFF, no_exclude);
     ASSERT(hit.hit == true);
     /* should hit at toi ~ 8.5 (wall edge at 9.5, minus circle radius 1) */
     ASSERT_FLOAT_EQ(hit.toi, 8.5f);
@@ -500,7 +502,7 @@ static void test_shape_cast_circle_with_normal(void) {
     ASSERT_FLOAT_EQ(hit.normal.y, 0.0f);
 
     /* sweep in opposite direction should miss */
-    RpRayHitWithNormal miss = rp_query_shape_cast_circle_with_normal(w, 0, 0, -1, 0, 100, 1.0f, 0xFFFFFFFF);
+    RpRayHitWithNormal miss = rp_query_shape_cast_circle_with_normal(w, 0, 0, -1, 0, 100, 1.0f, 0xFFFFFFFF, no_exclude);
     ASSERT(miss.hit == false);
 
     rp_world_destroy(w);
@@ -512,6 +514,7 @@ static void test_shape_cast_circle_with_normal(void) {
 
 static void test_shape_cast_penetration_escape(void) {
     RpWorld *w = rp_world_create(0.0f, 0.0f, NULL, NULL);
+    RpHandle no_exclude = {0xFFFFFFFF, 0xFFFFFFFF};
 
     /*
      * Test stop_at_penetration=false behaviour:
@@ -527,22 +530,67 @@ static void test_shape_cast_penetration_escape(void) {
     /* Cast a circle (r=1) from origin going UP — perpendicular to overlap.
        With stop_at_penetration=false, the initial overlap is ignored,
        so the cast should NOT report a hit (nothing above to hit). */
-    RpRayHit hit = rp_query_shape_cast_circle(w, 0, 0, 0, 1, 100, 1.0f, 0xFFFFFFFF);
+    RpRayHit hit = rp_query_shape_cast_circle(w, 0, 0, 0, 1, 100, 1.0f, 0xFFFFFFFF, no_exclude);
     ASSERT(hit.hit == false);
 
     /* same test for the with_normal variant */
-    RpRayHitWithNormal hit2 = rp_query_shape_cast_circle_with_normal(w, 0, 0, 0, 1, 100, 1.0f, 0xFFFFFFFF);
+    RpRayHitWithNormal hit2 = rp_query_shape_cast_circle_with_normal(w, 0, 0, 0, 1, 100, 1.0f, 0xFFFFFFFF, no_exclude);
     ASSERT(hit2.hit == false);
 
     /* Non-penetrating case should still work normally:
        cast from far left going right toward the circle at (0.5, 0) */
-    RpRayHit normal_hit = rp_query_shape_cast_circle(w, -10, 0, 1, 0, 100, 0.5f, 0xFFFFFFFF);
+    RpRayHit normal_hit = rp_query_shape_cast_circle(w, -10, 0, 1, 0, 100, 0.5f, 0xFFFFFFFF, no_exclude);
     ASSERT(normal_hit.hit == true);
     ASSERT(normal_hit.toi > 0.0f);
 
-    RpRayHitWithNormal normal_hit2 = rp_query_shape_cast_circle_with_normal(w, -10, 0, 1, 0, 100, 0.5f, 0xFFFFFFFF);
+    RpRayHitWithNormal normal_hit2 = rp_query_shape_cast_circle_with_normal(w, -10, 0, 1, 0, 100, 0.5f, 0xFFFFFFFF, no_exclude);
     ASSERT(normal_hit2.hit == true);
     ASSERT(normal_hit2.toi > 0.0f);
+
+    rp_world_destroy(w);
+}
+
+/* ------------------------------------------------------------------ */
+/*  16c. Shape cast — exclude_handle filters out a specific collider   */
+/* ------------------------------------------------------------------ */
+
+static void test_shape_cast_exclude_handle(void) {
+    RpWorld *w = rp_world_create(0.0f, 0.0f, NULL, NULL);
+    RpHandle no_exclude = {0xFFFFFFFF, 0xFFFFFFFF};
+
+    /* Two walls in a line: near wall at x=5, far wall at x=10.
+       Without exclusion, a cast from origin going +x should hit the near wall first.
+       When we exclude the near wall, it should skip through and hit the far wall. */
+    RpHandle near_wall = rp_collider_create_rect(w, 5, 0, 0, 0.5f, 5, 0, 0, 0xFFFFFFFF);
+    RpHandle far_wall  = rp_collider_create_rect(w, 10, 0, 0, 0.5f, 5, 0, 0, 0xFFFFFFFF);
+    rp_world_step(w);
+
+    /* Baseline: no exclusion → hits near wall (toi ~ 3.5 = 4.5 edge - 1 radius) */
+    RpRayHit baseline = rp_query_shape_cast_circle(w, 0, 0, 1, 0, 100, 1.0f, 0xFFFFFFFF, no_exclude);
+    ASSERT(baseline.hit == true);
+    ASSERT(baseline.handle.id == near_wall.id && baseline.handle.generation == near_wall.generation);
+    ASSERT_FLOAT_EQ(baseline.toi, 3.5f);
+
+    /* Exclude near wall → hits far wall (toi ~ 8.5 = 9.5 edge - 1 radius) */
+    RpRayHit skip = rp_query_shape_cast_circle(w, 0, 0, 1, 0, 100, 1.0f, 0xFFFFFFFF, near_wall);
+    ASSERT(skip.hit == true);
+    ASSERT(skip.handle.id == far_wall.id && skip.handle.generation == far_wall.generation);
+    ASSERT_FLOAT_EQ(skip.toi, 8.5f);
+
+    /* Exclude both walls — using far_wall as exclude still leaves near_wall as the hit */
+    RpRayHit still_hits_near = rp_query_shape_cast_circle(w, 0, 0, 1, 0, 100, 1.0f, 0xFFFFFFFF, far_wall);
+    ASSERT(still_hits_near.hit == true);
+    ASSERT(still_hits_near.handle.id == near_wall.id);
+
+    /* Same checks for the with_normal variant */
+    RpRayHitWithNormal baseline_n = rp_query_shape_cast_circle_with_normal(w, 0, 0, 1, 0, 100, 1.0f, 0xFFFFFFFF, no_exclude);
+    ASSERT(baseline_n.hit == true);
+    ASSERT(baseline_n.handle.id == near_wall.id);
+
+    RpRayHitWithNormal skip_n = rp_query_shape_cast_circle_with_normal(w, 0, 0, 1, 0, 100, 1.0f, 0xFFFFFFFF, near_wall);
+    ASSERT(skip_n.hit == true);
+    ASSERT(skip_n.handle.id == far_wall.id);
+    ASSERT_FLOAT_EQ(skip_n.toi, 8.5f);
 
     rp_world_destroy(w);
 }
@@ -1031,9 +1079,10 @@ static void test_null_safety(void) {
     RpRayHitWithNormal rhn = rp_query_ray_cast_with_normal(NULL, 0, 0, 1, 0, 10, 0xFFFFFFFF);
     ASSERT(rhn.hit == false);
     ASSERT(rp_query_ray_cast_all(NULL, 0, 0, 1, 0, 10, 0xFFFFFFFF, buf, 4) == 0);
-    RpRayHit sc = rp_query_shape_cast_circle(NULL, 0, 0, 1, 0, 10, 1, 0xFFFFFFFF);
+    RpHandle no_exclude = {0xFFFFFFFF, 0xFFFFFFFF};
+    RpRayHit sc = rp_query_shape_cast_circle(NULL, 0, 0, 1, 0, 10, 1, 0xFFFFFFFF, no_exclude);
     ASSERT(sc.hit == false);
-    RpRayHitWithNormal scn = rp_query_shape_cast_circle_with_normal(NULL, 0, 0, 1, 0, 10, 1, 0xFFFFFFFF);
+    RpRayHitWithNormal scn = rp_query_shape_cast_circle_with_normal(NULL, 0, 0, 1, 0, 10, 1, 0xFFFFFFFF, no_exclude);
     ASSERT(scn.hit == false);
 
     ASSERT(rp_query_intersection_test(NULL, h, h) == false);
@@ -1082,6 +1131,7 @@ int main(void) {
     RUN_TEST(test_shape_cast_circle);
     RUN_TEST(test_shape_cast_circle_with_normal);
     RUN_TEST(test_shape_cast_penetration_escape);
+    RUN_TEST(test_shape_cast_exclude_handle);
     RUN_TEST(test_intersect_circle);
     RUN_TEST(test_intersect_rect);
     RUN_TEST(test_intersect_capsule);

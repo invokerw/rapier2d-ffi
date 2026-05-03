@@ -484,6 +484,8 @@ uint32_t rp_query_ray_cast_all(const struct RpWorld *world,
  * 这相当于"粗射线检测"（thick raycast）/ 扫掠测试（sweep test）。
  * 可以理解为：一个圆形沿着路径滑动，看它最先碰到什么。
  * - `radius`: 投射的圆形半径
+ * - `exclude_handle`: 要从结果中排除的碰撞体句柄（常用于让物体避免检测到自身）。
+ *   传入 `RpHandle::invalid()`（id 和 generation 都是 u32::MAX）表示不排除任何 collider。
  * - 其他参数与射线检测类似
  */
 struct RpRayHit rp_query_shape_cast_circle(const struct RpWorld *world,
@@ -493,11 +495,14 @@ struct RpRayHit rp_query_shape_cast_circle(const struct RpWorld *world,
                                            float dir_y,
                                            float max_toi,
                                            float radius,
-                                           uint32_t group);
+                                           uint32_t group,
+                                           struct RpHandle exclude_handle);
 
 /**
  * 将一个圆形沿指定方向投射，返回第一个碰到的碰撞体，同时包含碰撞点和表面法线。
  * 比 rp_query_shape_cast_circle 提供更多信息（法线和碰撞点），适用于需要反弹方向等场景。
+ * - `exclude_handle`: 要从结果中排除的碰撞体句柄（常用于让物体避免检测到自身）。
+ *   传入 `RpHandle::invalid()` 表示不排除任何 collider。
  */
 struct RpRayHitWithNormal rp_query_shape_cast_circle_with_normal(const struct RpWorld *world,
                                                                  float origin_x,
@@ -506,7 +511,8 @@ struct RpRayHitWithNormal rp_query_shape_cast_circle_with_normal(const struct Rp
                                                                  float dir_y,
                                                                  float max_toi,
                                                                  float radius,
-                                                                 uint32_t group);
+                                                                 uint32_t group,
+                                                                 struct RpHandle exclude_handle);
 
 /**
  * 测试两个指定的碰撞体当前是否相交（重叠）。
