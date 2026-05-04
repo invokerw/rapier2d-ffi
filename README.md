@@ -88,7 +88,7 @@ cc -o test/test_rapier2d test/test_rapier2d.c \
 LD_LIBRARY_PATH=target/release ./test/test_rapier2d
 ```
 
-测试包含 28 个场景、163 个断言，覆盖所有 API 功能、确定性验证和 NULL 安全。
+测试包含 31 个场景、196 个断言，覆盖所有 API 功能、确定性验证和 NULL 安全。
 
 ### 可视化测试（raylib）
 
@@ -307,6 +307,7 @@ RpHandle rp_query_point_intersect(world, x, y, group);           // 点查询
 uint32_t rp_query_intersect_circle(world, x, y, radius, group, out, max);              // 圆形区域
 uint32_t rp_query_intersect_rect(world, x, y, angle, half_w, half_h, group, out, max); // 矩形区域
 uint32_t rp_query_intersect_capsule(world, x, y, angle, half_h, radius, group, out, max); // 胶囊区域
+uint32_t rp_query_intersect_sector(world, x, y, radius, start_angle, sweep_angle, segments, group, out, max); // 扇形区域
 
 // 寻找空旷点
 RpVec2   rp_query_find_clear_point(world, x, y, r, r2, ignore_types, group, mode, max_attempts, &found);          // 圆形搜索区域
@@ -382,6 +383,36 @@ if (found) {
 | `0` | 均匀随机采样（搜索区域内各处概率相同） | 随机刷怪、随机放置物品 |
 | `1` | 优先靠近中心（先尝试中心点，逐渐向外扩展） | 围绕目标点生成、就近寻找空位 |
 
+## 扇形区域查询
+
+`rp_query_intersect_sector` 以 `(x, y)` 为顶点，从 `start_angle` 方向**逆时针**扫过 `sweep_angle` 弧度，外圆半径为 `radius`，返回所有与此扇形重叠的碰撞体。
+
+```c
+RpHandle hits[16];
+// 以原点为顶点，朝向 +X 轴，±45° 共 90° 扇形，半径 10
+uint32_t n = rp_query_intersect_sector(
+    world,
+    0.0f, 0.0f,        // 扇形顶点
+    10.0f,             // 外圆半径
+    -0.785398f,        // start_angle：-π/4（从 -45° 方向起）
+    1.570796f,         // sweep_angle：π/2（共扫过 90°）
+    12,                // segments：弧段细分，建议 8~16
+    0xFFFFFFFF,        // 碰撞组过滤
+    hits, 16
+);
+```
+
+参数说明：
+- `start_angle`：起始方向的弧度角（0 = +X 轴，π/2 = +Y 轴）。
+- `sweep_angle`：扫过的弧度，必须 > 0。
+  - `>= 2π` 时退化为整圆，等价于 `rp_query_intersect_circle`。
+  - `∈ (π, 2π)` 时内部拆成两个凸子扇形通过 `Compound` 合并（单个凸多边形无法表达 > 180°）。
+  - `<= π` 时为单个凸多边形，最常用。
+- `segments`：弧段细分数量，最少 2。越大越贴近真实圆弧，开销越高。典型值 8~16 即可满足视觉需求。
+- 非法参数（`radius <= 0`、`sweep_angle <= 0`、`world == NULL`）返回 0。
+
+相比先用 `intersect_circle` 粗筛、再按角度过滤的朴素方案，此接口基于 parry 的凸形相交测试，能正确命中"中心在扇外、但边缘伸进扇内"的大体积碰撞体。
+
 ## 碰撞组
 
 碰撞组使用 32 位掩码。每个碰撞体有一个 **membership**（属于哪些组），查询时传入 **filter**（测试哪些组）。当 `(membership & filter) != 0` 时碰撞体会被包含在结果中。
@@ -421,7 +452,7 @@ rapier2d-ffi/
 ├── rapier2d_ffi.h                # 自动生成的 C 头文件（勿手动编辑）
 ├── CLAUDE.md                     # Claude Code 工作指南
 ├── test/
-│   ├── test_rapier2d.c           # C 单元测试（28 个场景，163 个断言）
+│   ├── test_rapier2d.c           # C 单元测试（31 个场景，196 个断言）
 │   ├── visual_test.c             # raylib 可视化测试
 │   └── build_visual_test.sh      # 可视化测试编译脚本
 └── README.md

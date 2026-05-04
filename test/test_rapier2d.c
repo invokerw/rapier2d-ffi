@@ -668,6 +668,65 @@ static void test_intersect_capsule(void) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  18b. Intersect sector (fan-shape area query)                       */
+/* ------------------------------------------------------------------ */
+
+static void test_intersect_sector(void) {
+    RpWorld *w = rp_world_create(0.0f, 0.0f, NULL, NULL);
+
+    /* circles at the 4 cardinal directions at distance 5 */
+    rp_collider_create_circle(w,  5,  0, 0.5f, 0, 0, 0xFFFFFFFF); /* A: 0°   */
+    rp_collider_create_circle(w,  0,  5, 0.5f, 0, 0, 0xFFFFFFFF); /* B: 90°  */
+    rp_collider_create_circle(w, -5,  0, 0.5f, 0, 0, 0xFFFFFFFF); /* C: 180° */
+    rp_collider_create_circle(w,  0, -5, 0.5f, 0, 0, 0xFFFFFFFF); /* D: 270° */
+    rp_world_step(w);
+
+    RpHandle hits[16];
+    const float PI_F = 3.14159265f;
+
+    /* 90° sector around +X axis: (-45°, 45°) → only A */
+    uint32_t count = rp_query_intersect_sector(
+        w, 0, 0, 10.0f, -PI_F / 4, PI_F / 2, 12, 0xFFFFFFFF, hits, 16);
+    ASSERT(count == 1);
+
+    /* 90° sector around +Y axis: (45°, 135°) → only B */
+    count = rp_query_intersect_sector(
+        w, 0, 0, 10.0f, PI_F / 4, PI_F / 2, 12, 0xFFFFFFFF, hits, 16);
+    ASSERT(count == 1);
+
+    /* 180° sector covering upper half with margin → A, B, C */
+    count = rp_query_intersect_sector(
+        w, 0, 0, 10.0f, -0.1f, PI_F + 0.2f, 12, 0xFFFFFFFF, hits, 16);
+    ASSERT(count == 3);
+
+    /* >180° sector (200°) from roughly -80° sweeping counter-clockwise → A, B (C and D excluded) */
+    count = rp_query_intersect_sector(
+        w, 0, 0, 10.0f, -PI_F * 80.0f / 180.0f, PI_F * 200.0f / 180.0f,
+        12, 0xFFFFFFFF, hits, 16);
+    ASSERT(count == 2);
+
+    /* full circle (sweep >= 2π) → all four */
+    count = rp_query_intersect_sector(
+        w, 0, 0, 10.0f, 0, PI_F * 2, 12, 0xFFFFFFFF, hits, 16);
+    ASSERT(count == 4);
+
+    /* radius too small to reach any circle → 0 */
+    count = rp_query_intersect_sector(
+        w, 0, 0, 2.0f, 0, PI_F * 2, 12, 0xFFFFFFFF, hits, 16);
+    ASSERT(count == 0);
+
+    /* NULL world → 0 */
+    ASSERT(rp_query_intersect_sector(
+        NULL, 0, 0, 10, 0, PI_F / 2, 12, 0xFFFFFFFF, hits, 16) == 0);
+
+    /* invalid sweep → 0 */
+    ASSERT(rp_query_intersect_sector(
+        w, 0, 0, 10, 0, 0, 12, 0xFFFFFFFF, hits, 16) == 0);
+
+    rp_world_destroy(w);
+}
+
+/* ------------------------------------------------------------------ */
 /*  19. Contact pairs                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -1135,6 +1194,7 @@ int main(void) {
     RUN_TEST(test_intersect_circle);
     RUN_TEST(test_intersect_rect);
     RUN_TEST(test_intersect_capsule);
+    RUN_TEST(test_intersect_sector);
     RUN_TEST(test_contact_pairs);
     RUN_TEST(test_collision_callbacks);
     RUN_TEST(test_log_callback);

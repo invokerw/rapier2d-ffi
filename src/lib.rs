@@ -1576,6 +1576,122 @@ pub unsafe extern "C" fn rp_query_intersect_capsule(
     count
 }
 
+/// 查找所有与指定扇形区域重叠的碰撞体。
+/// 扇形以 (x, y) 为顶点，从 `start_angle` 方向逆时针扫过 `sweep_angle` 弧度，外圆半径为 `radius`。
+/// - `start_angle`: 起始方向（弧度，0 指向 +X 轴）
+/// - `sweep_angle`: 扫过的角度（弧度），必须 > 0；>= 2π 时退化为整圆查询
+/// - `segments`: 弧段细分数量（最少 2，建议 8~16）。越大越接近真实圆弧，开销越高
+///
+/// 实现说明：扇形由顶点 + 弧上 `segments+1` 个点构成凸多边形。
+/// 当 `sweep_angle > π` 时（凸多边形无法表达），会拆成两个子扇形用 `Compound` 合并。
+/// 当 `sweep_angle >= 2π` 时直接退化为 `Ball`。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rp_query_intersect_sector(
+    world: *const RpWorld,
+    x: f32,
+    y: f32,
+    radius: f32,
+    start_angle: f32,
+    sweep_angle: f32,
+    segments: u32,
+    group: u32,
+    out_handles: *mut RpHandle,
+    max_results: u32,
+) -> u32 {
+    if world.is_null() || out_handles.is_null() || radius <= 0.0 || sweep_angle <= 0.0 {
+        return 0;
+    }
+    let w = &*world;
+    let seg = (segments as usize).max(2);
+    let two_pi = std::f32::consts::PI * 2.0;
+    let sweep = sweep_angle.min(two_pi);
+
+    let filter = QueryFilter::default()
+        .groups(InteractionGroups::new(Group::ALL, group.into(), InteractionTestMode::And));
+    let qp = w.broad_phase.as_query_pipeline(
+        w.narrow_phase.query_dispatcher(),
+        &w.bodies,
+        &w.colliders,
+        filter,
+    );
+    let buf = std::slice::from_raw_parts_mut(out_handles, max_results as usize);
+    let shape_pos = Pose::translation(x, y);
+    let mut count = 0u32;
+
+    let mut push_hit = |handle: ColliderHandle, count: &mut u32| -> bool {
+        if *count >= max_results {
+            return false;
+        }
+        buf[*count as usize] = RpHandle::from_collider(handle);
+        *count += 1;
+        true
+    };
+
+    // 构造局部空间内一个子扇形的顶点（顶点在原点，CCW 顺序）。
+    let build_wedge_points = |a0: f32, span: f32, n: usize| -> Vec<Vector> {
+        let mut pts = Vec::with_capacity(n + 2);
+        pts.push(Vector::new(0.0, 0.0));
+        for i in 0..=n {
+            let t = i as f32 / n as f32;
+            let a = a0 + span * t;
+            pts.push(Vector::new(radius * a.cos(), radius * a.sin()));
+        }
+        pts
+    };
+
+    if sweep >= two_pi - 1e-4 {
+        let shape = Ball::new(radius);
+        for (handle, _) in qp.intersect_shape(shape_pos, &shape) {
+            if !push_hit(handle, &mut count) {
+                break;
+            }
+        }
+        return count;
+    }
+
+    if sweep <= std::f32::consts::PI {
+        let Some(shape) =
+            parry::shape::ConvexPolygon::from_convex_polyline(build_wedge_points(start_angle, sweep, seg))
+        else {
+            return 0;
+        };
+        for (handle, _) in qp.intersect_shape(shape_pos, &shape) {
+            if !push_hit(handle, &mut count) {
+                break;
+            }
+        }
+        return count;
+    }
+
+    // sweep ∈ (π, 2π)：拆成两个凸子扇形。
+    let half = sweep * 0.5;
+    let sub_n = ((seg + 1) / 2).max(2);
+    let Some(s1) = parry::shape::ConvexPolygon::from_convex_polyline(build_wedge_points(
+        start_angle,
+        half,
+        sub_n,
+    )) else {
+        return 0;
+    };
+    let Some(s2) = parry::shape::ConvexPolygon::from_convex_polyline(build_wedge_points(
+        start_angle + half,
+        sweep - half,
+        sub_n,
+    )) else {
+        return 0;
+    };
+    let compound = parry::shape::Compound::new(vec![
+        (Pose::identity(), SharedShape::new(s1)),
+        (Pose::identity(), SharedShape::new(s2)),
+    ]);
+    for (handle, _) in qp.intersect_shape(shape_pos, &compound) {
+        if !push_hit(handle, &mut count) {
+            break;
+        }
+    }
+    count
+}
+
 // ---------------------------------------------------------------------------
 // 在指定圆内寻找空旷点
 // ---------------------------------------------------------------------------

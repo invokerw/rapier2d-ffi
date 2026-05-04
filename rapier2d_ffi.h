@@ -579,6 +579,28 @@ uint32_t rp_query_intersect_capsule(const struct RpWorld *world,
                                     uint32_t max_results);
 
 /**
+ * 查找所有与指定扇形区域重叠的碰撞体。
+ * 扇形以 (x, y) 为顶点，从 `start_angle` 方向逆时针扫过 `sweep_angle` 弧度，外圆半径为 `radius`。
+ * - `start_angle`: 起始方向（弧度，0 指向 +X 轴）
+ * - `sweep_angle`: 扫过的角度（弧度），必须 > 0；>= 2π 时退化为整圆查询
+ * - `segments`: 弧段细分数量（最少 2，建议 8~16）。越大越接近真实圆弧，开销越高
+ *
+ * 实现说明：扇形由顶点 + 弧上 `segments+1` 个点构成凸多边形。
+ * 当 `sweep_angle > π` 时（凸多边形无法表达），会拆成两个子扇形用 `Compound` 合并。
+ * 当 `sweep_angle >= 2π` 时直接退化为 `Ball`。
+ */
+uint32_t rp_query_intersect_sector(const struct RpWorld *world,
+                                   float x,
+                                   float y,
+                                   float radius,
+                                   float start_angle,
+                                   float sweep_angle,
+                                   uint32_t segments,
+                                   uint32_t group,
+                                   struct RpHandle *out_handles,
+                                   uint32_t max_results);
+
+/**
  * 在指定圆形区域内寻找一个"空旷"的点，该点周围 `r2` 半径内没有指定类型的碰撞体。
  *
  * 算法：在搜索圆 (x, y, r) 内采样候选点，对每个候选点做半径 `r2` 的圆形区域查询，
